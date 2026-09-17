@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "project_name" {
   description = "Name prefix used for all resources"
   type        = string
-  default     = "lambda-streaming"
+  default     = "springboot-streaming"
 }
 
 variable "environment" {
@@ -17,15 +17,15 @@ variable "environment" {
 }
 
 variable "lambda_memory_mb" {
-  description = "Lambda memory in MB (512 MB minimum recommended for Docker images)"
+  description = "Lambda memory in MB (1024 MB recommended for JVM warmup)"
   type        = number
-  default     = 512
+  default     = 1024
 }
 
 variable "lambda_timeout_seconds" {
-  description = "Lambda execution timeout in seconds. Raise to 300–900 for real LLM calls."
+  description = "Lambda execution timeout in seconds. Must exceed the slowest provider (30 s) + AI scoring delay."
   type        = number
-  default     = 60
+  default     = 65
 }
 
 variable "log_retention_days" {

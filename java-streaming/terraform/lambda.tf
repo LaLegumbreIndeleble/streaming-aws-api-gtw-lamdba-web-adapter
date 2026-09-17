@@ -18,13 +18,13 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
 
 resource "aws_lambda_function" "streaming" {
   function_name = "${var.project_name}-${var.environment}"
-  description   = "FastAPI streaming via Lambda Web Adapter + Docker"
+  description   = "Spring Boot SSE flight search streaming via Lambda Web Adapter + Docker"
 
   # Docker image packaging
   package_type = "Image"
   image_uri    = docker_registry_image.app.name
 
-  # Resources
+  # Resources — JVM needs headroom above 512 MB
   memory_size = var.lambda_memory_mb
   timeout     = var.lambda_timeout_seconds
 
@@ -36,8 +36,14 @@ resource "aws_lambda_function" "streaming" {
       # Lambda Web Adapter reads these at startup (already baked into image,
       # but explicit here makes them visible in Terraform state)
       AWS_LWA_INVOKE_MODE          = "RESPONSE_STREAM"
-      AWS_LWA_READINESS_CHECK_PATH = "/health"
-      PORT                         = "8080"
+      AWS_LWA_READINESS_CHECK_PATH = "/healthz"
+      PORT                         = "8000"
+
+      # Spring Boot + JVM cold start can exceed the 10-second extension init
+      # phase timeout that Lambda enforces for extensions. ASYNC_INIT=true tells
+      # LWA to register the extension immediately and defer the readiness check
+      # to the first invoke phase, which has the full function timeout (65 s).
+      AWS_LWA_ASYNC_INIT = "true"
     }
   }
 

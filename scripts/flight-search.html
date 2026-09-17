@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Flight Search — Live Streaming</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f0f2f5;
+    color: #1a1a2e;
+    min-height: 100vh;
+  }
+
+  header {
+    background: #1a1a2e;
+    color: #fff;
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: 0.02em; }
+  header span { font-size: 0.8rem; opacity: 0.45; }
+
+  .top-bar {
+    background: #fff;
+    border-bottom: 1px solid #e0e0e0;
+    padding: 12px 32px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .route-badge {
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 40px;
+    padding: 7px 18px;
+    font-size: 0.87rem;
+    font-weight: 500;
+  }
+  .search-btn {
+    background: #0057ff;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 26px;
+    font-size: 0.93rem;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.03em;
+    transition: background 0.15s;
+  }
+  .search-btn:hover    { background: #0041cc; }
+  .search-btn:disabled { background: #aaa; cursor: not-allowed; }
+
+  .ai-toggle-wrap {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.86rem;
+    font-weight: 600;
+    padding: 7px 13px;
+    border: 1.5px solid #e0e0e0;
+    border-radius: 8px;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .ai-toggle-wrap:hover { border-color: #7c3aed; background: #faf5ff; }
+  .ai-toggle-wrap input { display: none; }
+  .toggle-knob {
+    width: 38px; height: 21px;
+    background: #ccc; border-radius: 11px;
+    position: relative; transition: background 0.2s; flex-shrink: 0;
+  }
+  .toggle-knob::after {
+    content: ''; position: absolute;
+    width: 15px; height: 15px; background: #fff;
+    border-radius: 50%; top: 3px; left: 3px;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  }
+  .ai-toggle-wrap input:checked ~ .toggle-knob          { background: #7c3aed; }
+  .ai-toggle-wrap input:checked ~ .toggle-knob::after   { transform: translateX(17px); }
+  .ai-toggle-wrap input:checked ~ .ai-label-text        { color: #7c3aed; }
+  .ai-chip {
+    background: #ede9fe; color: #7c3aed;
+    font-size: 0.6rem; font-weight: 800;
+    padding: 2px 6px; border-radius: 8px; letter-spacing: 0.06em;
+  }
+
+  #statusLabel { font-size: 0.8rem; color: #888; margin-left: auto; }
+
+  /* ── Layout ── */
+  .content {
+    display: grid;
+    grid-template-columns: 1fr 240px;
+    gap: 20px;
+    padding: 20px 32px;
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+
+  /* ── Main panel ── */
+  .panel {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-header {
+    padding: 13px 18px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-title { font-size: 1rem; font-weight: 700; }
+  .badge {
+    font-size: 0.67rem; font-weight: 600;
+    padding: 2px 8px; border-radius: 20px;
+    background: #e8f0fe; color: #0057ff;
+    margin-left: 8px;
+  }
+
+  .progress-wrap { padding: 10px 18px 8px; }
+  .progress-label { font-size: 0.7rem; color: #888; margin-bottom: 4px; }
+  .progress-bar-outer { height: 4px; background: #eee; border-radius: 4px; overflow: hidden; }
+  .progress-bar-inner {
+    height: 100%; background: #0057ff; border-radius: 4px;
+    transition: width 0.35s ease; width: 0%;
+  }
+
+  .cards-container { padding: 10px 18px; min-height: 420px; flex: 1; }
+
+  /* ── Flight Card ── */
+  .flight-card {
+    display: flex;
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    margin-bottom: 9px;
+    position: relative;
+    background: #fff;
+    transition: box-shadow 0.2s;
+    will-change: transform;
+  }
+  .flight-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,0.1); }
+
+  .card-accent {
+    width: 5px; flex-shrink: 0;
+    background: #0057ff;
+    border-radius: 10px 0 0 10px;
+    transition: background 0.4s;
+  }
+  .flight-card.top-ranked .card-accent { background: #7c3aed; }
+
+  .card-body {
+    flex: 1; padding: 11px 13px;
+    display: flex; align-items: center; gap: 12px;
+    position: relative; min-width: 0;
+  }
+
+  .airline-col { min-width: 84px; }
+  .airline-name { font-weight: 700; font-size: 0.87rem; }
+  .airline-code { font-size: 0.7rem; color: #888; margin-top: 1px; }
+
+  .flight-times { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .time-block { text-align: center; }
+  .time { font-size: 0.93rem; font-weight: 700; }
+  .iata { font-size: 0.67rem; color: #888; margin-top: 1px; }
+
+  .route-line { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+  .rl-inner { display: flex; align-items: center; gap: 4px; width: 100%; }
+  .rl-line { flex: 1; height: 1px; background: #bbb; }
+  .plane-icon { font-size: 0.78rem; color: #555; }
+  .duration { font-size: 0.67rem; color: #777; }
+
+  .stops-badge {
+    font-size: 0.63rem; padding: 1px 6px; border-radius: 10px;
+    background: #fbe9e7; color: #bf360c; font-weight: 600;
+  }
+  .stops-badge.nonstop { background: #e8f5e9; color: #2e7d32; }
+
+  .price-col { text-align: right; min-width: 84px; }
+  .price-from { font-size: 0.63rem; color: #888; }
+  .price { font-size: 1.08rem; font-weight: 800; color: #1a1a2e; }
+  .price-sub { font-size: 0.63rem; color: #888; margin-top: 1px; }
+
+  .select-btn {
+    background: #0057ff; color: #fff; border: none;
+    border-radius: 6px; padding: 6px 11px;
+    font-size: 0.7rem; font-weight: 700;
+    cursor: pointer; margin-left: 6px; flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  .select-btn:hover { background: #0041cc; }
+
+  /* ── Score badge — shown immediately, card arrives already scored ── */
+  .score-badge {
+    position: absolute; top: 6px; right: 7px;
+    font-size: 0.64rem; font-weight: 800;
+    padding: 3px 8px; border-radius: 12px;
+    pointer-events: none; z-index: 2;
+    animation: pop-in 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.4);
+  }
+  .score-badge.high { background: #dcfce7; color: #15803d; }
+  .score-badge.mid  { background: #fef9c3; color: #854d0e; }
+  .score-badge.low  { background: #fee2e2; color: #b91c1c; }
+
+  @keyframes pop-in {
+    0%   { transform: scale(0.55); opacity: 0; }
+    100% { transform: scale(1);    opacity: 1; }
+  }
+
+  /* ── Better deal banner ── */
+  .best-deal-banner {
+    background: linear-gradient(90deg, #7c3aed, #2563eb);
+    color: #fff; border-radius: 8px;
+    padding: 9px 16px; font-size: 0.77rem; font-weight: 700;
+    margin-bottom: 8px; letter-spacing: 0.02em;
+    animation: banner-slide 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: opacity 0.4s;
+  }
+  @keyframes banner-slide {
+    from { transform: translateY(-14px) scale(0.93); opacity: 0; }
+    to   { transform: translateY(0) scale(1); opacity: 1; }
+  }
+
+  /* ── Metrics bar ── */
+  .metrics-bar {
+    display: flex; border-top: 1px solid #eee; background: #fafafa;
+  }
+  .metric { flex: 1; padding: 10px 7px; border-right: 1px solid #eee; text-align: center; }
+  .metric:last-child { border-right: none; }
+  .metric-label { font-size: 0.59rem; color: #888; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; white-space: nowrap; }
+  .metric-value { font-size: 0.97rem; font-weight: 800; color: #1a1a2e; white-space: nowrap; }
+  .metric-value.blue   { color: #0057ff; }
+  .metric-value.purple { color: #7c3aed; }
+
+  /* ── Sidebar ── */
+  .sidebar { display: flex; flex-direction: column; gap: 14px; }
+
+  .side-card {
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    padding: 14px 16px;
+  }
+  .side-card h3 {
+    font-size: 0.71rem; font-weight: 700; color: #888;
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px;
+  }
+
+  .provider-row {
+    display: flex; align-items: center; gap: 9px;
+    padding: 7px 0; border-bottom: 1px solid #f0f0f0; font-size: 0.83rem;
+  }
+  .provider-row:last-child { border-bottom: none; }
+
+  .pdot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: #e0e0e0; flex-shrink: 0; transition: background 0.35s;
+  }
+  .pdot.done { background: #22c55e; }
+
+  .pname  { font-weight: 600; flex: 1; }
+  .peta   { font-size: 0.7rem; color: #bbb; white-space: nowrap; }
+  .peta.responded { color: #22c55e; font-weight: 700; }
+  .pcount { font-size: 0.7rem; color: #0057ff; font-weight: 700; min-width: 14px; text-align: right; }
+
+  .ai-note { font-size: 0.79rem; color: #555; line-height: 1.65; }
+  .ai-note strong { color: #7c3aed; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Flight Search — Live Streaming Demo</h1>
+  <span>Spring Boot · Java 25 · SSE · Lambda Web Adapter</span>
+</header>
+
+<div class="top-bar">
+  <div class="route-badge">JFK ⇄ LAX &nbsp;·&nbsp; 17 Sep → 11 Oct &nbsp;·&nbsp; Economy</div>
+
+  <button class="search-btn" id="searchBtn" onclick="startSearch()">▶ Search Flights</button>
+
+  <label class="ai-toggle-wrap">
+    <input type="checkbox" id="aiToggle" checked />
+    <span class="toggle-knob"></span>
+    <span class="ai-label-text">AI Ranking</span>
+    <span class="ai-chip">AI</span>
+  </label>
+
+  <span id="statusLabel">Ready</span>
+</div>
+
+<div class="content">
+
+  <!-- ══ Flight panel ══ -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">
+        Live Results
+        <span class="badge">SSE / Chunked</span>
+      </div>
+      <span style="font-size:0.72rem;color:#aaa;">GET /search/stream</span>
+    </div>
+    <div class="progress-wrap">
+      <div class="progress-label" id="progress-label">Click "Search Flights" to begin</div>
+      <div class="progress-bar-outer"><div class="progress-bar-inner" id="progress-bar"></div></div>
+    </div>
+    <div class="cards-container" id="cards"></div>
+    <div class="metrics-bar">
+      <div class="metric">
+        <div class="metric-label">First Result</div>
+        <div class="metric-value blue" id="m-ttfc">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Flights</div>
+        <div class="metric-value" id="m-found">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Re-ranks</div>
+        <div class="metric-value purple" id="m-reranks">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Best Score</div>
+        <div class="metric-value purple" id="m-best">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Sidebar ══ -->
+  <div class="sidebar">
+    <div class="side-card">
+      <h3>Providers</h3>
+      <div id="providers-list"></div>
+    </div>
+    <div class="side-card" id="ai-side" style="display:none;">
+      <h3>AI Ranking</h3>
+      <p class="ai-note">
+        The backend scores each flight <strong>50–100</strong> before sending it.
+        Cards arrive already ranked — the list re-sorts automatically when a
+        higher-scored result lands. ★ = AI score.
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Config — point at the Spring Boot container ──────────────────────────
+const API = 'http://localhost:8000/search/stream';
+
+const safeId = s => s.replace(/[\s/]+/g, '-');
+const fmt    = ms => ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`;
+
+const PROVIDER_META = [
+  { name: 'JetBlue',   expected: '~5s'  },
+  { name: 'Delta',     expected: '~10s' },
+  { name: 'United',    expected: '~15s' },
+  { name: 'American',  expected: '~22s' },
+  { name: 'Air China', expected: '~30s' },
+];
+
+let state;
+
+function mkState() {
+  return {
+    startTime: null, ttfc: null,
+    totalFlights: 12, cards: 0, reranks: 0,
+    bestScore: null, aiEnabled: false,
+    flights: [],   // { flightId, score }
+    providers: {}, // name → count
+  };
+}
+
+// ── Provider sidebar ──────────────────────────────────────────────────────
+function buildProviders() {
+  const list = document.getElementById('providers-list');
+  list.innerHTML = '';
+  PROVIDER_META.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'provider-row';
+    row.innerHTML = `
+      <div class="pdot" id="pdot-${safeId(p.name)}"></div>
+      <span class="pname">${p.name}</span>
+      <span class="pcount" id="pcount-${safeId(p.name)}"></span>
+      <span class="peta"   id="peta-${safeId(p.name)}">${p.expected}</span>`;
+    list.appendChild(row);
+  });
+}
+
+function providerArrived(airline, count) {
+  const elapsed = ((Date.now() - state.startTime) / 1000).toFixed(1);
+  const sid = safeId(airline);
+  const dot = document.getElementById(`pdot-${sid}`);
+  const eta = document.getElementById(`peta-${sid}`);
+  const cnt = document.getElementById(`pcount-${sid}`);
+  if (dot) dot.className = 'pdot done';
+  if (eta) { eta.textContent = `+${elapsed}s`; eta.className = 'peta responded'; }
+  if (cnt) cnt.textContent = count;
+}
+
+// ── Build card DOM node ───────────────────────────────────────────────────
+function makeCard(flight) {
+  const card = document.createElement('div');
+  card.className = 'flight-card';
+  card.id = `card-${safeId(flight.flightId)}`;
+  card.dataset.flightId = flight.flightId;
+
+  const accent = document.createElement('div');
+  accent.className = 'card-accent';
+
+  const body = document.createElement('div');
+  body.className = 'card-body';
+
+  const stopsHtml = flight.stops === 0
+    ? `<span class="stops-badge nonstop">Nonstop</span>`
+    : `<span class="stops-badge">${flight.stops} stop${flight.stops > 1 ? 's' : ''}</span>`;
+
+  body.innerHTML = `
+    <div class="airline-col">
+      <div class="airline-name">${flight.airline}</div>
+      <div class="airline-code">${flight.code}</div>
+    </div>
+    <div class="flight-times">
+      <div class="time-block">
+        <div class="time">${flight.departure}</div>
+        <div class="iata">${flight.from}</div>
+      </div>
+      <div class="route-line">
+        <div class="rl-inner">
+          <div class="rl-line"></div>
+          <div class="plane-icon">✈</div>
+          <div class="rl-line"></div>
+        </div>
+        <div class="duration">${flight.duration}</div>
+        ${stopsHtml}
+      </div>
+      <div class="time-block">
+        <div class="time">${flight.arrival}</div>
+        <div class="iata">${flight.to}</div>
+      </div>
+    </div>
+    <div class="price-col">
+      <div class="price-from">from</div>
+      <div class="price">${flight.price}</div>
+      <div class="price-sub">per traveler</div>
+    </div>
+    <button class="select-btn">SELECT</button>`;
+
+  // Score badge — arrives with the card (backend held until scored)
+  if (flight.score != null) {
+    const badge = document.createElement('div');
+    const tier  = flight.score >= 85 ? 'high' : flight.score >= 70 ? 'mid' : 'low';
+    badge.className   = `score-badge ${tier}`;
+    badge.textContent = `★ ${flight.score}`;
+    body.appendChild(badge);
+  }
+
+  card.appendChild(accent);
+  card.appendChild(body);
+  return card;
+}
+
+// ── Add a flight, sort and FLIP-animate existing cards into new positions ─
+function addFlight(flight) {
+  const container = document.getElementById('cards');
+  const hasScore  = flight.score != null;
+
+  state.flights.push({ flightId: flight.flightId, score: hasScore ? flight.score : null });
+  state.cards++;
+  if (state.ttfc === null) state.ttfc = Date.now() - state.startTime;
+
+  // Provider tracking
+  const p = state.providers[flight.airline] || { count: 0 };
+  const isFirst = p.count === 0;
+  p.count++;
+  state.providers[flight.airline] = p;
+  if (isFirst) providerArrived(flight.airline, p.count);
+  else { const el = document.getElementById(`pcount-${safeId(flight.airline)}`); if (el) el.textContent = p.count; }
+
+  // Best score tracking
+  if (hasScore && (state.bestScore === null || flight.score > state.bestScore))
+    state.bestScore = flight.score;
+
+  // Snapshot positions of EXISTING cards before any DOM change
+  const prevTopId = container.querySelector('.flight-card')?.dataset?.flightId ?? null;
+  const positions = {};
+  container.querySelectorAll('.flight-card').forEach(el => {
+    positions[el.dataset.flightId] = el.getBoundingClientRect().top;
+  });
+
+  // Append new card (hidden) at the end — will be moved into sorted position next
+  const card = makeCard(flight);
+  card.style.opacity = '0';
+  container.appendChild(card);
+
+  if (hasScore) {
+    // Sort: higher score first, unscored at bottom
+    state.flights.sort((a, b) => {
+      if (a.score === null && b.score === null) return 0;
+      if (a.score === null)  return  1;
+      if (b.score === null)  return -1;
+      return b.score - a.score;
+    });
+
+    // Re-order DOM nodes (appendChild moves, no clone)
+    state.flights.forEach(f => {
+      const el = document.getElementById(`card-${safeId(f.flightId)}`);
+      if (el) container.appendChild(el);
+    });
+
+    // FLIP: animate existing cards from their old positions to their new ones
+    container.querySelectorAll('.flight-card').forEach(el => {
+      const fid = el.dataset.flightId;
+      if (fid === flight.flightId) return; // new card fades in from its final position
+      const delta = (positions[fid] ?? 0) - el.getBoundingClientRect().top;
+      if (Math.abs(delta) < 1) return;
+      el.style.transition = 'none';
+      el.style.transform  = `translateY(${delta}px)`;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        el.style.transition = 'transform 0.5s cubic-bezier(0.34, 1.15, 0.64, 1)';
+        el.style.transform  = 'translateY(0)';
+      }));
+    });
+
+    // Highlight #1
+    container.querySelectorAll('.flight-card').forEach((el, i) =>
+      el.classList.toggle('top-ranked', i === 0));
+
+    // Banner if the top slot changed
+    const newTopId = container.querySelector('.flight-card')?.dataset?.flightId ?? null;
+    if (prevTopId !== null && newTopId !== prevTopId) {
+      state.reranks++;
+      showBanner(container, container.querySelector('.flight-card'));
+    }
+  }
+
+  // Fade in the new card at its (already sorted) final position
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    card.style.transition = 'opacity 0.35s';
+    card.style.opacity    = '1';
+  }));
+
+  updateMetrics();
+}
+
+function showBanner(container, topEl) {
+  const old = container.querySelector('.best-deal-banner');
+  if (old) { old.style.opacity = '0'; setTimeout(() => old.remove(), 350); }
+  const b = document.createElement('div');
+  b.className   = 'best-deal-banner';
+  b.textContent = '⬆ Better deal found — re-ranked by AI';
+  container.insertBefore(b, topEl);
+  setTimeout(() => { b.style.opacity = '0'; setTimeout(() => b.remove(), 420); }, 3200);
+}
+
+function updateMetrics() {
+  const total = state.totalFlights;
+  const pct   = total > 0 ? Math.round((state.cards / total) * 100) : 0;
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-label').textContent =
+    state.cards < total ? `${state.cards} / ${total} results arriving…` : `All ${total} results loaded`;
+  if (state.ttfc !== null)
+    document.getElementById('m-ttfc').textContent = fmt(state.ttfc);
+  document.getElementById('m-found').textContent   = `${state.cards} / ${total}`;
+  document.getElementById('m-reranks').textContent = state.aiEnabled ? `${state.reranks}` : 'off';
+  document.getElementById('m-best').textContent    = state.bestScore != null ? `★ ${state.bestScore}` : '—';
+}
+
+// ── Main search ───────────────────────────────────────────────────────────
+let activeSource = null;
+
+function startSearch() {
+  if (activeSource) { activeSource.close(); activeSource = null; }
+
+  state = mkState();
+  state.startTime = Date.now();
+  state.aiEnabled = document.getElementById('aiToggle').checked;
+
+  document.getElementById('cards').innerHTML            = '';
+  document.getElementById('searchBtn').disabled         = true;
+  document.getElementById('statusLabel').textContent    = 'Searching…';
+  document.getElementById('progress-bar').style.width   = '0%';
+  ['m-ttfc','m-found','m-reranks','m-best'].forEach(id =>
+    document.getElementById(id).textContent = '—');
+  document.getElementById('ai-side').style.display = state.aiEnabled ? 'block' : 'none';
+  buildProviders();
+  updateMetrics();
+
+  const seed = Math.floor(Math.random() * 99999) + 1;
+  const url  = state.aiEnabled
+    ? `${API}?ai=true&seed=${seed}`
+    : `${API}?ai=false`;
+
+  function finish() {
+    if (activeSource) { activeSource.close(); activeSource = null; }
+    document.getElementById('searchBtn').disabled = false;
+  }
+
+  try {
+    const es = new EventSource(url);
+    activeSource = es;
+
+    es.onmessage = (event) => {
+      if (event.data === '[DONE]') {
+        document.getElementById('statusLabel').textContent = 'Search complete.';
+        finish();
+        return;
+      }
+      try {
+        const ev = JSON.parse(event.data);
+        if      (ev.type === 'meta')   { state.totalFlights = ev.totalFlights; updateMetrics(); }
+        else if (ev.type === 'flight') addFlight(ev);
+      } catch (_) {}
+    };
+
+    es.onerror = () => {
+      // Only show error if we haven't received any data yet
+      if (state.cards === 0) {
+        document.getElementById('cards').innerHTML = `
+          <div style="padding:20px;color:#c00;font-size:.88rem;line-height:1.8;">
+            <strong>Cannot reach the API.</strong><br>
+            Start the container:<br>
+            <code style="background:#f5f5f5;padding:2px 6px;border-radius:4px;display:block;margin-top:6px;">
+              docker run --rm -p 8000:8000 springboot-streaming
+            </code><br>
+            Then open this file via a local server to avoid browser CORS restrictions:<br>
+            <code style="background:#f5f5f5;padding:2px 6px;border-radius:4px;display:block;margin-top:6px;">
+              python3 -m http.server 3000 --directory scripts/
+            </code>
+            and open <a href="http://localhost:3000/flight-search.html">http://localhost:3000/flight-search.html</a>
+          </div>`;
+        document.getElementById('statusLabel').textContent = 'Error.';
+      }
+      finish();
+    };
+  } catch (err) {
+    document.getElementById('statusLabel').textContent = 'Error.';
+    document.getElementById('searchBtn').disabled = false;
+  }
+}
+</script>
+</body>
+</html>

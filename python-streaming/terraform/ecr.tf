@@ -36,19 +36,18 @@ resource "aws_ecr_lifecycle_policy" "app" {
 #  Docker image — build locally & push to ECR
 #
 #  The kreuzwerker/docker provider handles:
-#    1. docker build  (from app/Dockerfile)
+#    1. docker build  (from python-streaming/Dockerfile)
 #    2. docker tag
 #    3. docker push   (authenticated via provider block in versions.tf)
 #
-#  triggers.dockerfile_hash forces a rebuild+push whenever
-#  the Dockerfile or app source files change.
+#  triggers force a rebuild+push whenever the Dockerfile or app source files change.
 # ─────────────────────────────────────────────
 
 resource "docker_image" "app" {
   name = "${aws_ecr_repository.app.repository_url}:latest"
 
   build {
-    context    = "${path.module}/../app"
+    context    = "${path.module}/.."
     dockerfile = "Dockerfile"
 
     # Target platform — Lambda always runs on x86_64
@@ -66,9 +65,9 @@ resource "docker_image" "app" {
 
   # Rebuild when source files change
   triggers = {
-    dockerfile = filesha256("${path.module}/../app/Dockerfile")
-    main_py    = filesha256("${path.module}/../app/main.py")
-    reqs       = filesha256("${path.module}/../app/requirements.txt")
+    dockerfile = filesha256("${path.module}/../Dockerfile")
+    main_py    = filesha256("${path.module}/../main.py")
+    reqs       = filesha256("${path.module}/../requirements.txt")
   }
 
   depends_on = [aws_ecr_repository.app]

@@ -1,27 +1,36 @@
-# Lambda Streaming v2 — Python / FastAPI / Docker / Terraform
+# Lambda Streaming — API Gateway REST + Lambda Web Adapter
 
-Streams tokens through **API Gateway REST → Lambda (Docker image) → FastAPI + Lambda Web Adapter**.
-No SAM. No zip files. Pure Terraform.
+Streams responses through **API Gateway REST → Lambda (Docker image) → Lambda Web Adapter**.
+No SAM. No zip files. Pure OpenTofu.
+
+Two self-contained implementations, same architecture pattern:
+
+| Version | Language / Framework | Stream type | Folder |
+|---|---|---|---|
+| Python | FastAPI + uvicorn | LLM token stream (fake/Bedrock) | `python-streaming/` |
+| Java | Spring Boot 3.5 + Java 25 | SSE flight search (multi-provider, AI ranking) | `java-streaming/` |
+
+Each folder contains its own app code **and** a `terraform/` subfolder — no shared infrastructure.
+
+---
+
+## Architecture
 
 ```
-Client
-  │  POST /stream  {"prompt": "..."}
+Browser / curl
+  │
   ▼
 API Gateway REST  (REGIONAL, response_transfer_mode=STREAM)
   │
   ▼
 Lambda  (Docker image, package_type=Image)
-  │  Lambda Web Adapter extension (AWS_LWA_INVOKE_MODE=RESPONSE_STREAM)
-  │  proxies HTTP ↔ Lambda runtime protocol
+  │  Lambda Web Adapter v1.0.1  (AWS_LWA_INVOKE_MODE=RESPONSE_STREAM)
+  │  translates HTTP ↔ Lambda runtime streaming protocol
   ▼
-FastAPI + uvicorn  (StreamingResponse, text/event-stream)
-  │  yields SSE chunks word by word
+App (FastAPI or Spring Boot)
+  │  yields SSE / chunked response
   ▼
-Client receives:
-  data: {"token":"You "}
-  data: {"token":"said: "}
-  ...
-  data: {"done":true}
+Client receives streamed events as they are produced
 ```
 
 ---
@@ -29,88 +38,65 @@ Client receives:
 ## Project structure
 
 ```
-streaming-v2/
-├── app/
-│   ├── Dockerfile          ← Python 3.12 + Lambda Web Adapter
-│   ├── main.py             ← FastAPI app with fake_stream()
-│   └── requirements.txt
-├── terraform/
-│   ├── versions.tf         ← aws + kreuzwerker/docker providers
-│   ├── variables.tf
-│   ├── ecr.tf              ← ECR repo + docker build + push
-│   ├── iam.tf              ← Lambda role (+ Bedrock policy commented)
-│   ├── lambda.tf           ← Docker image Lambda
-│   ├── api_gateway.tf      ← REST API, STREAM integration, stage
-│   └── outputs.tf
-└── stream-chat.sh          ← bash terminal chat client (unchanged)
+streaming-aws-api-gtw-lambda-web-adapter/
+├── docs/
+│   └── lambda-streaming-debugging.md   ← header schema, cold start fixes, debug order
+├── python-streaming/
+│   ├── Dockerfile                      ← Python 3.12 + Lambda Web Adapter
+│   ├── main.py                         ← FastAPI app with fake_stream() / Bedrock
+│   ├── requirements.txt
+│   └── terraform/                      ← ECR, Lambda, API Gateway (POST /stream)
+└── java-streaming/
+    ├── Dockerfile                      ← Eclipse Temurin 25 + Lambda Web Adapter
+    ├── pom.xml                         ← Spring Boot 3.5.4, Java 25
+    ├── src/
+    ├── test-local.sh
+    └── terraform/                      ← ECR, Lambda, API Gateway (GET /search/stream)
+```
+
+---
+
+## Quick start
+
+### Python version
+
+```bash
+cd python-streaming/terraform
+tofu init
+tofu apply
+# output: stream_endpoint
+curl -N -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Tell me something"}' \
+  https://<api-id>.execute-api.us-east-1.amazonaws.com/dev/stream
+```
+
+### Java version
+
+```bash
+cd java-streaming/terraform
+tofu init
+tofu apply
+# output: stream_endpoint
+curl -N \
+  -H "Accept: text/event-stream" \
+  "https://<api-id>.execute-api.us-east-1.amazonaws.com/dev/search/stream?ai=false&seed=42"
 ```
 
 ---
 
 ## Prerequisites
 
-- Terraform >= 1.9 + AWS provider >= 6.41
-- **Docker Desktop running locally** (kreuzwerker/docker builds the image on your machine)
+- OpenTofu >= 1.9 + AWS provider >= 6.41
+- **Docker Desktop running locally** (kreuzwerker/docker provider builds the image on your machine)
 - AWS credentials with ECR, Lambda, API Gateway, IAM permissions
 
 ---
 
-## Deploy
+## Debugging
 
-```bash
-cd terraform
-terraform init
-terraform apply
-```
-
-Terraform will:
-1. Create an ECR repository
-2. Build the Docker image locally (`docker build`)
-3. Push it to ECR (`docker push`)
-4. Create the Lambda function pointing at that image
-5. Wire up API Gateway with `response_transfer_mode = "STREAM"`
-
----
-
-## Test
-
-```bash
-# From terraform output:
-terraform output -raw curl_test_command | bash
-
-# Or manually (the -N flag stops curl buffering the stream):
-curl -N -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"Tell me something"}' \
-  https://<api-id>.execute-api.<region>.amazonaws.com/dev/stream
-```
-
-### Terminal chat client
-
-```bash
-chmod +x stream-chat.sh
-STREAM_URL=$(cd terraform && terraform output -raw stream_endpoint) ./stream-chat.sh
-```
-
----
-
-## Swap in real Bedrock
-
-1. In `main.py` replace `fake_stream()` with the commented-out `bedrock_stream()`.
-2. In `iam.tf` uncomment the `lambda_bedrock` policy attachment.
-3. `terraform apply` — Terraform detects the source file change via `filesha256()`,
-   rebuilds the image, pushes it, and updates the Lambda.
-
----
-
-## Key Terraform concepts used
-
-| Resource | What it does |
-|---|---|
-| `aws_ecr_repository` | Creates the container registry |
-| `docker_image` | Builds the image locally via `docker build` |
-| `docker_registry_image` | Pushes it to ECR via `docker push` |
-| `aws_lambda_function` `package_type="Image"` | Docker-packaged Lambda (no zip/handler/runtime) |
-| `aws_api_gateway_integration` `response_transfer_mode="STREAM"` | Enables streaming in API GW (provider 6.x) |
-| `aws_lambda_function.response_streaming_invoke_arn` | Correct streaming URI without manual string hacks (provider 6.x) |
-| `aws_api_gateway_account` | One-time account setting for CloudWatch logging |
+See [`docs/lambda-streaming-debugging.md`](docs/lambda-streaming-debugging.md) for hard-won lessons:
+- Always invoke Lambda directly first, then test through API Gateway
+- The API Gateway streaming prelude schema and the `Vary` header trap
+- `AWS_LWA_ASYNC_INIT=true` for JVM cold start beyond the 10 s extension limit
+- Which CloudWatch log groups to check for each layer
